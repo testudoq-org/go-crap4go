@@ -148,4 +148,3 @@ func collectFiles(dir string, paths []string) ([]string, error) {
 
 	return result, err
 }
-

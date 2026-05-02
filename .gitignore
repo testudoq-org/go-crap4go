@@ -1,4 +1,4 @@
 *.exe
-*.out
-coverage
-coverage_*
+# Generated coverage profile files in the root (not testdata fixtures)
+/coverage*.out
+/coverage*
