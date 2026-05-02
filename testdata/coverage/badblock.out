@@ -1,0 +1,2 @@
+mode: set
+github.com/example/pkg/foo.go:notanumber.1,5.2 3 1
