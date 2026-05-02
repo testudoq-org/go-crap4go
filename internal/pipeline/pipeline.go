@@ -109,6 +109,10 @@ func collectFiles(dir string, paths []string) ([]string, error) {
 			return walkErr
 		}
 		if d.IsDir() {
+			// Never skip the root directory itself (e.g. "." starts with ".").
+			if path == dir {
+				return nil
+			}
 			name := d.Name()
 			if strings.HasPrefix(name, ".") || name == "vendor" || name == "testdata" {
 				return filepath.SkipDir

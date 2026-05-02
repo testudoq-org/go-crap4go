@@ -1,6 +1,7 @@
 package pipeline_test
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -266,6 +267,84 @@ func TestAnalyse_BadCoverProfile_Error(t *testing.T) {
 	_, err := pipeline.Analyse(cfg)
 	if err == nil {
 		t.Error("Analyse with bad CoverProfile returned nil error; want error")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Edge cases
+// ---------------------------------------------------------------------------
+
+// TestAnalyse_DotDirNotSkipped verifies that walking from "." (current directory)
+// does not skip the root — regression test for the collectFiles bug where
+// d.Name() == "." triggers the hidden-directory guard and skips everything.
+func TestAnalyse_DotDirNotSkipped(t *testing.T) {
+	// Use fixturesDir/foo as our "current directory" by resolving an absolute
+	// path. The fixtures root itself is not named "." so we need to test the
+	// actual "." case. We do that by chdir-ing into the foo fixture directory.
+	_, thisFile, _, _ := runtime.Caller(0)
+	moduleRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
+	fooDir := filepath.Join(moduleRoot, "testdata", "pipeline", "foo")
+
+	origDir, err := filepath.Abs(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(fooDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	// Dir="" defaults to "." which is now fooDir; no paths filter.
+	cfg := config.Config{}
+	entries, err := pipeline.Analyse(cfg)
+	if err != nil {
+		t.Fatalf("Analyse: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("Analyse from '.' returned 0 entries; want > 0 (root dir skipped?)")
+	}
+}
+
+// TestAnalyse_EmptyDir verifies that a directory with no .go files returns
+// an empty slice (not an error).
+func TestAnalyse_EmptyDir(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Config{Dir: dir}
+	entries, err := pipeline.Analyse(cfg)
+	if err != nil {
+		t.Fatalf("Analyse empty dir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("Analyse empty dir returned %d entries; want 0", len(entries))
+	}
+}
+
+// TestAnalyse_NoMatchingPaths verifies that a path filter that matches no
+// files returns an empty slice (not an error).
+func TestAnalyse_NoMatchingPaths(t *testing.T) {
+	cfg := config.Config{
+		Dir:   fixturesDir(t),
+		Paths: []string{"zzz_no_match"},
+	}
+	entries, err := pipeline.Analyse(cfg)
+	if err != nil {
+		t.Fatalf("Analyse no-match: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("Analyse no-match returned %d entries; want 0", len(entries))
+	}
+}
+
+// TestAnalyse_ParseError verifies that a syntactically invalid Go file causes
+// Analyse to return an error.
+func TestAnalyse_ParseError(t *testing.T) {
+	cfg := config.Config{
+		Dir:   fixturesDir(t),
+		Paths: []string{"bad"},
+	}
+	_, err := pipeline.Analyse(cfg)
+	if err == nil {
+		t.Error("Analyse with unparseable file returned nil error; want error")
 	}
 }
 

@@ -100,16 +100,21 @@ crap --threshold=20
 ### Example output
 
 ```
-FUNCTION                      FILE                          CC   COV%   CRAP  RISK
-──────────────────────────────────────────────────────────────────────────────────
-Extract                       complexity/extractor.go        7   42.0   41.2  HIGH
-run                           cmd/crap/main.go               5    0.0   30.0  HIGH
-MapCoverage                   coverage/parser.go             4   65.0   10.3  moderate
-LoadProfile                   coverage/parser.go             3   87.5    3.5  low
-Score                         crap/crap.go                   1  100.0    1.0  low
-──────────────────────────────────────────────────────────────────────────────────
-5 functions analysed · 2 high risk · threshold 30
+FUNCTION                       FILE                             CC    COV%    CRAP  RISK
+───────────────────────────────────────────────────────────────────────────────────────────
+<anonymous:153>                internal/complexity/extractor…   15     n/a   240.0  HIGH
+run                            cmd/crap/main.go                 11     n/a   132.0  HIGH
+LoadProfile                    internal/coverage/parser.go       9     n/a    90.0  HIGH
+parseBlockLine                 internal/coverage/parser.go       8     n/a    72.0  HIGH
+MapCoverage                    internal/coverage/parser.go       8     n/a    72.0  HIGH
+<anonymous:107>                internal/pipeline/pipeline.go    13   91.3%    13.1  moderate
+Analyse                        internal/pipeline/pipeline.go    12   91.7%    12.1  moderate
+FormatReport                   internal/report/report.go         3     n/a    12.0  moderate
+───────────────────────────────────────────────────────────────────────────────────────────
+25 functions analysed • 6 high risk
 ```
+
+*(Output from running `crap --no-run-tests --coverprofile=coverage_pipeline.out` against itself with pipeline-only coverage.)*
 
 Exit code `1` is returned when any function's CRAP score meets or exceeds the threshold.
 
