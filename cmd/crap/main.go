@@ -14,14 +14,17 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 
 	"github.com/go-crap4go/crap4go/internal/config"
+	"github.com/go-crap4go/crap4go/internal/crap"
+	"github.com/go-crap4go/crap4go/internal/pipeline"
+	"github.com/go-crap4go/crap4go/internal/report"
 	"github.com/spf13/cobra"
 )
 
 func main() {
 	if err := buildRootCommand().Execute(); err != nil {
-		// cobra already prints the error; just set a non-zero exit code.
 		os.Exit(1)
 	}
 }
@@ -64,7 +67,6 @@ contain at least one of the supplied fragments (OR semantics).`,
 			return run(cfg)
 		},
 
-		// Silence cobra's default error formatting; we handle it ourselves.
 		SilenceUsage: true,
 	}
 
@@ -95,22 +97,91 @@ contain at least one of the supplied fragments (OR semantics).`,
 }
 
 // run executes the full crap4go analysis pipeline for the given Config.
-//
-// Pipeline steps:
-//  1. Load and merge config file (if --config is set).
-//  2. Optionally run 'go test ./... -coverprofile=...' to produce coverage data.
-//  3. Parse all non-test .go files (respecting path filters).
-//  4. Extract per-function CC and LOC via AST analysis.
-//  5. Parse the coverage profile and map blocks to functions.
-//  6. Compute CRAP scores.
-//  7. Render and print the report.
-//  8. Return an error (→ exit 1) if any function meets or exceeds the threshold.
-//
-// TODO(prompt-4): implement full orchestration logic.
 func run(cfg config.Config) error {
-	// Stub — full orchestration implemented in Prompt 4.
-	fmt.Fprintf(os.Stderr,
-		"crap4go: analysis pipeline not yet implemented (scaffold only)\n"+
-			"  config: %+v\n", cfg)
+	// Validate mutually exclusive flags.
+	if cfg.RunTests && cfg.NoRunTests {
+		return fmt.Errorf("--run-tests and --no-run-tests are mutually exclusive")
+	}
+	if cfg.NoRunTests && cfg.CoverProfile == "" {
+		return fmt.Errorf("--no-run-tests requires --coverprofile to be set")
+	}
+
+	// Run go test if needed to generate a coverage profile.
+	needRunTests := cfg.CoverProfile == "" && !cfg.NoRunTests
+	if cfg.RunTests {
+		needRunTests = true
+	}
+	if needRunTests {
+		tmpProfile, err := runGoTests()
+		if err != nil {
+			return fmt.Errorf("running go test: %w", err)
+		}
+		defer os.Remove(tmpProfile)
+		cfg.CoverProfile = tmpProfile
+	}
+
+	// Analysis pipeline.
+	entries, err := pipeline.Analyse(cfg)
+	if err != nil {
+		return err
+	}
+
+	// Filter: by default hide low-risk functions.
+	displayed := filterEntries(entries, cfg.ShowAll)
+
+	// Render report.
+	fmt.Print(report.FormatReport(displayed))
+
+	// Threshold check (against ALL entries, not just displayed).
+	high := countHighRisk(entries, cfg.Threshold)
+	if high > 0 {
+		return fmt.Errorf("%d function(s) scored >= %d (threshold)", high, cfg.Threshold)
+	}
 	return nil
+}
+
+// runGoTests runs "go test -coverprofile=<tmp> ./..." in the current directory
+// and returns the path to the temporary coverage file. The caller is
+// responsible for deleting the file when done.
+func runGoTests() (string, error) {
+	tmp, err := os.CreateTemp("", "crap4go-coverage-*.out")
+	if err != nil {
+		return "", fmt.Errorf("create temp coverage file: %w", err)
+	}
+	tmp.Close()
+
+	cmd := exec.Command("go", "test", "-coverprofile="+tmp.Name(), "./...")
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		os.Remove(tmp.Name())
+		return "", fmt.Errorf("go test: %w", err)
+	}
+	return tmp.Name(), nil
+}
+
+// filterEntries returns entries to display. When showAll is false, low-risk
+// functions (CRAP score < 5) are hidden.
+func filterEntries(entries []crap.Entry, showAll bool) []crap.Entry {
+	if showAll {
+		return entries
+	}
+	result := make([]crap.Entry, 0, len(entries))
+	for _, e := range entries {
+		if crap.RiskLevel(e.Score) != "low" {
+			result = append(result, e)
+		}
+	}
+	return result
+}
+
+// countHighRisk returns the number of entries whose score is >= threshold.
+func countHighRisk(entries []crap.Entry, threshold int) int {
+	count := 0
+	for _, e := range entries {
+		if e.Score >= float64(threshold) {
+			count++
+		}
+	}
+	return count
 }

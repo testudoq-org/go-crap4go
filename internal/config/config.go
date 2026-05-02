@@ -9,6 +9,10 @@ package config
 
 // Config holds all runtime configuration for the crap4go analysis pipeline.
 type Config struct {
+	// Dir is the root directory to analyse. When empty the pipeline uses
+	// the current working directory (typically the module root).
+	Dir string
+
 	// Paths is an optional list of path fragment filters. Only functions in
 	// files whose paths contain at least one of these fragments are analysed.
 	// An empty slice means analyse the entire module.
