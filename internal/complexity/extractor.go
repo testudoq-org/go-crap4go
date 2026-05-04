@@ -146,56 +146,84 @@ func (e *extractor) visitFuncLit(lit *ast.FuncLit, outerStartLine int) {
 // CC counting
 // ---------------------------------------------------------------------------
 
+// logicalOps is the set of binary operators that contribute +1 to CC.
+var logicalOps = map[token.Token]struct{}{
+	token.LAND: {},
+	token.LOR:  {},
+}
+
 // countCC walks stmtBody and increments fn.CC for each CC-contributing node.
 // When a nested FuncLit is encountered, countCC delegates to the extractor
 // so the closure is reported as a separate entry rather than inflating fn.CC.
 func countCC(body *ast.BlockStmt, fn *Function, e *extractor) {
 	ast.Inspect(body, func(n ast.Node) bool {
-		if n == nil {
-			return false
-		}
-		switch node := n.(type) {
-		case *ast.FuncLit:
-			// Closure — report separately; do NOT descend into it for fn.
-			e.visitFuncLit(node, fn.StartLine)
-			return false // stop descending for this branch
-
-		case *ast.IfStmt:
-			fn.CC++
-
-		case *ast.ForStmt:
-			fn.CC++
-
-		case *ast.RangeStmt:
-			fn.CC++
-
-		case *ast.CaseClause:
-			// SwitchStmt and TypeSwitchStmt share CaseClause.
-			// Only non-default cases add to CC.
-			if node.List != nil {
-				fn.CC++
-			}
-
-		case *ast.CommClause:
-			// SelectStmt communication clause.
-			// Only non-default comms add to CC.
-			if node.Comm != nil {
-				fn.CC++
-			}
-
-		case *ast.BinaryExpr:
-			if node.Op.String() == "&&" || node.Op.String() == "||" {
-				fn.CC++
-			}
-
-		case *ast.BranchStmt:
-			// GotoStmt is represented as BranchStmt with Tok == token.GOTO.
-			if node.Tok == token.GOTO {
-				fn.CC++
-			}
-		}
-		return true
+		return e.inspectNode(n, fn)
 	})
+}
+
+// inspectNode processes a single AST node during the CC walk.
+// It returns false to stop descent when a FuncLit (closure) is encountered,
+// delegating it to a separate Function entry.
+func (e *extractor) inspectNode(n ast.Node, fn *Function) bool {
+	if n == nil {
+		return false
+	}
+	if lit, ok := n.(*ast.FuncLit); ok {
+		e.visitFuncLit(lit, fn.StartLine)
+		return false
+	}
+	fn.CC += nodeCC(n)
+	return true
+}
+
+// nodeCC returns the CC contribution (0 or 1) of a single AST node.
+// It does not descend; descent is controlled by the caller.
+func nodeCC(n ast.Node) int {
+	switch node := n.(type) {
+	case *ast.IfStmt, *ast.ForStmt, *ast.RangeStmt:
+		return 1
+	case *ast.CaseClause:
+		return caseClauseCC(node)
+	case *ast.CommClause:
+		return commClauseCC(node)
+	case *ast.BinaryExpr:
+		return binaryExprCC(node)
+	case *ast.BranchStmt:
+		return branchStmtCC(node)
+	}
+	return 0
+}
+
+// caseClauseCC returns 1 for a non-default case in a switch or type switch.
+func caseClauseCC(c *ast.CaseClause) int {
+	if c.List != nil {
+		return 1
+	}
+	return 0
+}
+
+// commClauseCC returns 1 for a non-default comm in a select statement.
+func commClauseCC(c *ast.CommClause) int {
+	if c.Comm != nil {
+		return 1
+	}
+	return 0
+}
+
+// binaryExprCC returns 1 when the operator is && or ||.
+func binaryExprCC(b *ast.BinaryExpr) int {
+	if _, ok := logicalOps[b.Op]; ok {
+		return 1
+	}
+	return 0
+}
+
+// branchStmtCC returns 1 for a goto statement.
+func branchStmtCC(b *ast.BranchStmt) int {
+	if b.Tok == token.GOTO {
+		return 1
+	}
+	return 0
 }
 
 // ---------------------------------------------------------------------------
@@ -262,4 +290,3 @@ func receiverTypeName(expr ast.Expr) string {
 		return "unknown"
 	}
 }
-

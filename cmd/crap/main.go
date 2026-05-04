@@ -98,43 +98,53 @@ contain at least one of the supplied fragments (OR semantics).`,
 
 // run executes the full crap4go analysis pipeline for the given Config.
 func run(cfg config.Config) error {
-	// Validate mutually exclusive flags.
+	if err := validateFlags(cfg); err != nil {
+		return err
+	}
+	tmpProfile, cfg, err := resolveProfile(cfg)
+	if tmpProfile != "" {
+		defer os.Remove(tmpProfile)
+	}
+	if err != nil {
+		return err
+	}
+	return analyse(cfg)
+}
+
+// validateFlags checks for invalid flag combinations.
+func validateFlags(cfg config.Config) error {
 	if cfg.RunTests && cfg.NoRunTests {
 		return fmt.Errorf("--run-tests and --no-run-tests are mutually exclusive")
 	}
 	if cfg.NoRunTests && cfg.CoverProfile == "" {
 		return fmt.Errorf("--no-run-tests requires --coverprofile to be set")
 	}
+	return nil
+}
 
-	// Run go test if needed to generate a coverage profile.
-	needRunTests := cfg.CoverProfile == "" && !cfg.NoRunTests
-	if cfg.RunTests {
-		needRunTests = true
+// resolveProfile determines whether to run go test and returns the temporary
+// coverage profile path (non-empty when a temp file was created by this call).
+func resolveProfile(cfg config.Config) (tmpPath string, updated config.Config, err error) {
+	needRun := cfg.RunTests || (cfg.CoverProfile == "" && !cfg.NoRunTests)
+	if !needRun {
+		return "", cfg, nil
 	}
-	if needRunTests {
-		tmpProfile, err := runGoTests()
-		if err != nil {
-			return fmt.Errorf("running go test: %w", err)
-		}
-		defer os.Remove(tmpProfile)
-		cfg.CoverProfile = tmpProfile
+	tmp, err := runGoTests()
+	if err != nil {
+		return "", cfg, fmt.Errorf("running go test: %w", err)
 	}
+	cfg.CoverProfile = tmp
+	return tmp, cfg, nil
+}
 
-	// Analysis pipeline.
+// analyse runs the pipeline, prints the report, and checks the threshold.
+func analyse(cfg config.Config) error {
 	entries, err := pipeline.Analyse(cfg)
 	if err != nil {
 		return err
 	}
-
-	// Filter: by default hide low-risk functions.
-	displayed := filterEntries(entries, cfg.ShowAll)
-
-	// Render report.
-	fmt.Print(report.FormatReport(displayed))
-
-	// Threshold check (against ALL entries, not just displayed).
-	high := countHighRisk(entries, cfg.Threshold)
-	if high > 0 {
+	fmt.Print(report.FormatReport(filterEntries(entries, cfg.ShowAll)))
+	if high := countHighRisk(entries, cfg.Threshold); high > 0 {
 		return fmt.Errorf("%d function(s) scored >= %d (threshold)", high, cfg.Threshold)
 	}
 	return nil

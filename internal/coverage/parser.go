@@ -36,6 +36,7 @@ import (
 	"bufio"
 	"fmt"
 	"go/token"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -87,33 +88,20 @@ func LoadProfile(filename string) (Profile, error) {
 		return Profile{}, fmt.Errorf("coverage: open %q: %w", filename, err)
 	}
 	defer f.Close()
+	return scanProfile(filename, f)
+}
 
+// scanProfile reads coverage lines from r and builds a Profile.
+func scanProfile(filename string, r io.Reader) (Profile, error) {
 	var p Profile
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(r)
 	lineNum := 0
 
 	for scanner.Scan() {
 		lineNum++
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
+		if err := processLine(filename, lineNum, strings.TrimSpace(scanner.Text()), &p); err != nil {
+			return Profile{}, err
 		}
-
-		if lineNum == 1 {
-			// First line must be "mode: <mode>"
-			mode, err := parseModeLine(line)
-			if err != nil {
-				return Profile{}, fmt.Errorf("coverage: %s:%d: %w", filename, lineNum, err)
-			}
-			p.Mode = mode
-			continue
-		}
-
-		b, err := parseBlockLine(line)
-		if err != nil {
-			return Profile{}, fmt.Errorf("coverage: %s:%d: %w", filename, lineNum, err)
-		}
-		p.Blocks = append(p.Blocks, b)
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -122,8 +110,28 @@ func LoadProfile(filename string) (Profile, error) {
 	if p.Mode == "" {
 		return Profile{}, fmt.Errorf("coverage: %q: empty or missing mode line", filename)
 	}
-
 	return p, nil
+}
+
+// processLine handles a single trimmed line from the coverage profile.
+func processLine(filename string, lineNum int, line string, p *Profile) error {
+	if line == "" {
+		return nil
+	}
+	if lineNum == 1 {
+		mode, err := parseModeLine(line)
+		if err != nil {
+			return fmt.Errorf("coverage: %s:%d: %w", filename, lineNum, err)
+		}
+		p.Mode = mode
+		return nil
+	}
+	b, err := parseBlockLine(line)
+	if err != nil {
+		return fmt.Errorf("coverage: %s:%d: %w", filename, lineNum, err)
+	}
+	p.Blocks = append(p.Blocks, b)
+	return nil
 }
 
 // MapCoverage maps coverage data from profile onto the provided functions and
@@ -144,29 +152,35 @@ func MapCoverage(
 
 	for _, fn := range functions {
 		key := fn.File + ":" + fn.Name
-		total, covered := 0, 0
-
-		for i := range profile.Blocks {
-			b := &profile.Blocks[i]
-			if !fileMatches(b.File, fn.File) {
-				continue
-			}
-			if b.StartLine >= fn.StartLine && b.EndLine <= fn.EndLine {
-				total += b.NumStmts
-				if b.Count > 0 {
-					covered += b.NumStmts
-				}
-			}
-		}
-
-		if total == 0 {
-			result[key] = -1
-		} else {
-			result[key] = float64(covered) / float64(total)
-		}
+		result[key] = coverageFraction(profile.Blocks, fn)
 	}
 
 	return result
+}
+
+// coverageFraction computes the statement coverage fraction for fn over blocks.
+// Returns -1 when no overlapping blocks are found.
+func coverageFraction(blocks []Block, fn *complexity.Function) float64 {
+	total, covered := 0, 0
+	for i := range blocks {
+		b := &blocks[i]
+		if !fileMatches(b.File, fn.File) || !blockInRange(b, fn) {
+			continue
+		}
+		total += b.NumStmts
+		if b.Count > 0 {
+			covered += b.NumStmts
+		}
+	}
+	if total == 0 {
+		return -1
+	}
+	return float64(covered) / float64(total)
+}
+
+// blockInRange reports whether b falls entirely within fn's line span.
+func blockInRange(b *Block, fn *complexity.Function) bool {
+	return b.StartLine >= fn.StartLine && b.EndLine <= fn.EndLine
 }
 
 // ---------------------------------------------------------------------------
@@ -192,54 +206,77 @@ func parseModeLine(line string) (string, error) {
 //
 //	<file>:<startLine>.<startCol>,<endLine>.<endCol> <numStmts> <count>
 func parseBlockLine(line string) (Block, error) {
-	// Split on the last colon before the numeric range to isolate the file path.
-	// File paths themselves may contain colons on Windows; the range always
-	// starts after the final colon that precedes a digit.
+	filePath, rest, err := splitFileAndRest(line)
+	if err != nil {
+		return Block{}, err
+	}
+	return parseBlockRest(filePath, rest, line)
+}
+
+// splitFileAndRest splits a block line at the last colon to separate the file
+// path from the numeric range and count fields.
+func splitFileAndRest(line string) (filePath, rest string, err error) {
 	colonIdx := strings.LastIndex(line, ":")
 	if colonIdx < 0 {
-		return Block{}, fmt.Errorf("missing colon in block line: %q", line)
+		return "", "", fmt.Errorf("missing colon in block line: %q", line)
 	}
-	filePath := line[:colonIdx]
-	rest := line[colonIdx+1:]
+	return line[:colonIdx], line[colonIdx+1:], nil
+}
 
-	// rest = "<startLine>.<startCol>,<endLine>.<endCol> <numStmts> <count>"
+// parseBlockRest parses the "startLine.col,endLine.col numStmts count" portion
+// of a block line, given the already-isolated file path.
+func parseBlockRest(filePath, rest, line string) (Block, error) {
 	fields := strings.Fields(rest)
 	if len(fields) != 3 {
 		return Block{}, fmt.Errorf("expected 3 fields after file path, got %d in %q", len(fields), line)
 	}
 
-	ranges := strings.Split(fields[0], ",")
-	if len(ranges) != 2 {
-		return Block{}, fmt.Errorf("expected start,end range in %q", fields[0])
+	start, end, err := parsePositions(fields[0])
+	if err != nil {
+		return Block{}, err
 	}
 
-	startLine, startCol, err := parseLineCol(ranges[0])
+	numStmts, count, err := parseCounts(fields[1], fields[2])
 	if err != nil {
-		return Block{}, fmt.Errorf("parsing start position: %w", err)
-	}
-	endLine, endCol, err := parseLineCol(ranges[1])
-	if err != nil {
-		return Block{}, fmt.Errorf("parsing end position: %w", err)
-	}
-
-	numStmts, err := strconv.Atoi(fields[1])
-	if err != nil {
-		return Block{}, fmt.Errorf("parsing numStmts %q: %w", fields[1], err)
-	}
-	count, err := strconv.Atoi(fields[2])
-	if err != nil {
-		return Block{}, fmt.Errorf("parsing count %q: %w", fields[2], err)
+		return Block{}, err
 	}
 
 	return Block{
 		File:      filePath,
-		StartLine: startLine,
-		StartCol:  startCol,
-		EndLine:   endLine,
-		EndCol:    endCol,
-		NumStmts:  numStmts,
-		Count:     count,
+		StartLine: start[0], StartCol: start[1],
+		EndLine: end[0], EndCol: end[1],
+		NumStmts: numStmts, Count: count,
 	}, nil
+}
+
+// parsePositions parses "startLine.startCol,endLine.endCol" into two [2]int.
+func parsePositions(rangeStr string) (start, end [2]int, err error) {
+	ranges := strings.Split(rangeStr, ",")
+	if len(ranges) != 2 {
+		return [2]int{}, [2]int{}, fmt.Errorf("expected start,end range in %q", rangeStr)
+	}
+	sl, sc, err := parseLineCol(ranges[0])
+	if err != nil {
+		return [2]int{}, [2]int{}, fmt.Errorf("parsing start position: %w", err)
+	}
+	el, ec, err := parseLineCol(ranges[1])
+	if err != nil {
+		return [2]int{}, [2]int{}, fmt.Errorf("parsing end position: %w", err)
+	}
+	return [2]int{sl, sc}, [2]int{el, ec}, nil
+}
+
+// parseCounts parses the numStmts and count string fields into integers.
+func parseCounts(numStmtsStr, countStr string) (numStmts, count int, err error) {
+	numStmts, err = strconv.Atoi(numStmtsStr)
+	if err != nil {
+		return 0, 0, fmt.Errorf("parsing numStmts %q: %w", numStmtsStr, err)
+	}
+	count, err = strconv.Atoi(countStr)
+	if err != nil {
+		return 0, 0, fmt.Errorf("parsing count %q: %w", countStr, err)
+	}
+	return numStmts, count, nil
 }
 
 // parseLineCol parses "line.col" into two ints.
@@ -273,4 +310,3 @@ func fileMatches(blockFile, funcFile string) bool {
 
 	return bf == ff || strings.HasSuffix(bf, "/"+ff)
 }
-
