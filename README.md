@@ -245,4 +245,4 @@ All packages must maintain **>= 85% statement coverage**. Critical packages (`in
 
 ## License
 
-CC BY-NC 4.0 — see [LICENCE](LICENCE).
+CC BY-NC 4.0 — see [LICENCE](LICENCE.MD).
