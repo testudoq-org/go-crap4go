@@ -1,0 +1,4 @@
+mode: set
+github.com/go-crap4go/crap4go/testdata/pipeline/foo/foo.go:4.19,6.2 1 1
+github.com/go-crap4go/crap4go/testdata/pipeline/foo/foo.go:9.27,12.3 1 1
+github.com/go-crap4go/crap4go/testdata/pipeline/foo/foo.go:13.2,14.23 1 0

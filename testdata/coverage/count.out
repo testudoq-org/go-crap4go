@@ -1,0 +1,5 @@
+mode: count
+github.com/go-crap4go/crap4go/internal/crap/crap.go:55.39,59.16 3 5
+github.com/go-crap4go/crap4go/internal/crap/crap.go:59.16,61.3 1 0
+github.com/go-crap4go/crap4go/internal/crap/crap.go:63.2,65.2 2 3
+github.com/go-crap4go/crap4go/internal/crap/crap.go:70.38,76.2 4 7

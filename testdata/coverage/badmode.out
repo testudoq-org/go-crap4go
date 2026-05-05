@@ -1,0 +1,2 @@
+mode: badmode
+github.com/example/pkg/foo.go:1.1,5.2 3 1

@@ -1,0 +1,4 @@
+coverprofile = "coverage.out"
+threshold = 25
+all = true
+paths = ["internal/crap", "internal/complexity"]
