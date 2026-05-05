@@ -27,3 +27,19 @@ func SimpleOr(x, y int) bool {
 	}
 	return false
 }
+
+// BoolAssign uses && in a plain assignment (not a branch condition).
+// The tool counts ALL &&/|| operators regardless of context, so CC = 2.
+// This is documented, condition-agnostic behaviour — not a bug.
+//
+// Expected: CC = 1 (base) + 1 (&&) = 2.
+func BoolAssign(a, b bool) bool {
+	result := a && b
+	return result
+}
+
+// BoolReturn uses || in a bare return (not a branch condition).
+// Expected: CC = 1 (base) + 1 (||) = 2.
+func BoolReturn(a, b bool) bool {
+	return a || b
+}

@@ -407,6 +407,69 @@ func TestLoadProfile_BadBlockLine(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Innermost-closure attribution
+// ---------------------------------------------------------------------------
+
+// TestMapCoverage_InnermostClosure verifies that when a closure's line range
+// is nested inside an outer function's line range, coverage blocks that fall
+// within the closure are attributed only to the closure (innermost-first),
+// and are NOT double-counted to the outer function.
+//
+// Fixture layout (closure.out):
+//
+//	Outer function:  lines 10–30   (mypkg/foo.go)
+//	Inner closure:   lines 15–25   (mypkg/foo.go)
+//
+//	blocks:
+//	  10–14  NumStmts=2  Count=1  → outer only
+//	  16–20  NumStmts=3  Count=1  → closure only (inside both spans)
+//	  22–24  NumStmts=1  Count=0  → closure only (inside both spans)
+//	  26–29  NumStmts=2  Count=1  → outer only
+//
+// Outer (excluding closure blocks): 2+2=4 stmts, 2+2=4 covered → 1.0
+// Closure:                           3+1=4 stmts, 3 covered   → 0.75
+func TestMapCoverage_InnermostClosure(t *testing.T) {
+	p, err := coverage.LoadProfile(testdataPath(t, "closure.out"))
+	if err != nil {
+		t.Fatalf("LoadProfile closure.out: %v", err)
+	}
+
+	file := "mypkg/foo.go"
+	fns := []*complexity.Function{
+		// outer: lines 10–30
+		{Name: "Outer", File: file, StartLine: 10, EndLine: 30},
+		// closure (innermost): lines 15–25
+		{Name: "<anonymous:15>", File: file, StartLine: 15, EndLine: 25},
+	}
+
+	result := coverage.MapCoverage(p, fns, nil)
+
+	closureKey := file + ":<anonymous:15>"
+	outerKey := file + ":Outer"
+
+	closureCov, ok := result[closureKey]
+	if !ok {
+		t.Fatalf("closure key %q not found; keys: %v", closureKey, mapKeys(result))
+	}
+	outerCov, ok := result[outerKey]
+	if !ok {
+		t.Fatalf("outer key %q not found; keys: %v", outerKey, mapKeys(result))
+	}
+
+	// Closure: blocks 16-20 (3 stmts, covered) + 22-24 (1 stmt, not covered)
+	// = 3/4 = 0.75
+	if abs(closureCov-0.75) > 1e-9 {
+		t.Errorf("closure coverage = %f; want 0.75", closureCov)
+	}
+
+	// Outer (innermost blocks excluded): blocks 10-14 (2 stmts, covered) +
+	// 26-29 (2 stmts, covered) = 4/4 = 1.0
+	if abs(outerCov-1.0) > 1e-9 {
+		t.Errorf("outer coverage = %f; want 1.0 (closure blocks must not be double-counted)", outerCov)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
 
