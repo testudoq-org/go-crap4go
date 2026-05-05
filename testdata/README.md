@@ -10,13 +10,15 @@ testdata/
 ├── complexity/        # .go source fixtures for CC extraction tests
 │   ├── simple.go      # single function, base CC
 │   ├── branches.go    # if/for/switch
-│   ├── logical.go     # &&/|| operators
+│   ├── logical.go     # &&/|| operators (incl. non-condition context pinning)
 │   ├── methods.go     # methods + pointer receivers
-│   └── closures.go    # nested FuncLit
+│   ├── closures.go    # nested FuncLit
+│   └── initfuncs.go   # multiple init() — deduplication test
 ├── coverage/          # coverage.out fixtures for parser tests
 │   ├── simple.out     # minimal "set" mode profile
 │   ├── count.out      # "count" mode profile
-│   └── atomic.out     # "atomic" mode profile
+│   ├── atomic.out     # "atomic" mode profile
+│   └── closure.out    # outer+inner closure — innermost attribution test
 ├── config/            # config file fixtures for loader tests
 │   ├── minimal.json   # {"threshold": 20} — only threshold set
 │   ├── minimal.toml   # threshold = 20 — only threshold set

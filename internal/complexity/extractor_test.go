@@ -317,6 +317,37 @@ func TestExtract_InIf_CC3(t *testing.T) {
 	}
 }
 
+// TestExtract_BoolAssign_CC2 pins the condition-agnostic &&/|| counting
+// behaviour: the tool counts logical operators regardless of whether they
+// appear in a branch condition or a plain assignment/return. This is a
+// documented design decision — not a bug.
+func TestExtract_BoolAssign_CC2(t *testing.T) {
+	fset, file, path := mustParseFile(t, "logical.go")
+	fns, _ := complexity.Extract(fset, file, path)
+	f := findFunc(fns, "BoolAssign")
+	if f == nil {
+		t.Fatal("BoolAssign not found")
+	}
+	// base(1) + &&(1) = 2  — && is in an assignment, not a branch condition
+	if f.CC != 2 {
+		t.Errorf("BoolAssign CC = %d; want 2 (condition-agnostic && counting)", f.CC)
+	}
+}
+
+// TestExtract_BoolReturn_CC2 pins condition-agnostic || counting in a return.
+func TestExtract_BoolReturn_CC2(t *testing.T) {
+	fset, file, path := mustParseFile(t, "logical.go")
+	fns, _ := complexity.Extract(fset, file, path)
+	f := findFunc(fns, "BoolReturn")
+	if f == nil {
+		t.Fatal("BoolReturn not found")
+	}
+	// base(1) + ||(1) = 2  — || is in a return, not a branch condition
+	if f.CC != 2 {
+		t.Errorf("BoolReturn CC = %d; want 2 (condition-agnostic || counting)", f.CC)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Methods
 // ---------------------------------------------------------------------------
@@ -473,6 +504,44 @@ func TestExtract_FileFieldSet(t *testing.T) {
 		if fn.File != path {
 			t.Errorf("Function.File = %q; want %q", fn.File, path)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// init() deduplication
+// ---------------------------------------------------------------------------
+
+// TestExtract_MultipleInit_UniqueNames verifies that when a file contains
+// multiple func init() declarations they are given unique names
+// (init, init#2, init#3) so that report output is unambiguous and
+// MapCoverage does not overwrite earlier entries.
+func TestExtract_MultipleInit_UniqueNames(t *testing.T) {
+	fset, file, path := mustParseFile(t, "initfuncs.go")
+	fns, err := complexity.Extract(fset, file, path)
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+
+	names := funcNames(fns)
+
+	// Expect exactly three entries, all from init() declarations.
+	var initFns []*complexity.Function
+	for _, f := range fns {
+		if f.Name == "init" || len(f.Name) > 4 && f.Name[:4] == "init" {
+			initFns = append(initFns, f)
+		}
+	}
+	if len(initFns) != 3 {
+		t.Fatalf("expected 3 init entries; got %d: %v", len(initFns), names)
+	}
+
+	// All three names must be distinct.
+	seen := make(map[string]bool, 3)
+	for _, f := range initFns {
+		if seen[f.Name] {
+			t.Errorf("duplicate init name %q; all names: %v", f.Name, names)
+		}
+		seen[f.Name] = true
 	}
 }
 

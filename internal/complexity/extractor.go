@@ -68,13 +68,38 @@ type Function struct {
 // fileSet must be the token.FileSet that was used to parse file.
 // filename is stored verbatim in each returned Function.File field.
 //
+// When a file contains multiple func init() declarations (which is valid Go),
+// Extract disambiguates them by appending a numeric suffix to all but the
+// first occurrence: init, init#2, init#3, …
+//
 // Extract never returns a nil slice. On a partial error it returns whatever
 // results were accumulated before the failure alongside a non-nil error.
 func Extract(fileSet *token.FileSet, file *ast.File, filename string) ([]*Function, error) {
 	results := make([]*Function, 0)
 	e := &extractor{fset: fileSet, file: filename, results: &results}
 	e.visitDecls(file.Decls)
+	deduplicateNames(results)
 	return results, nil
+}
+
+// deduplicateNames appends a numeric suffix (#2, #3, …) to any Function whose
+// Name appears more than once in the slice. The first occurrence keeps its
+// original name; subsequent occurrences are renamed in order.
+func deduplicateNames(fns []*Function) {
+	count := make(map[string]int, len(fns))
+	for _, f := range fns {
+		count[f.Name]++
+	}
+	// Second pass: rename duplicates.
+	seq := make(map[string]int, len(fns))
+	for _, f := range fns {
+		if count[f.Name] > 1 {
+			seq[f.Name]++
+			if seq[f.Name] > 1 {
+				f.Name = fmt.Sprintf("%s#%d", f.Name, seq[f.Name])
+			}
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -211,6 +236,13 @@ func commClauseCC(c *ast.CommClause) int {
 }
 
 // binaryExprCC returns 1 when the operator is && or ||.
+//
+// Note: this counts logical operators regardless of whether they appear in a
+// branch-deciding condition (e.g. if x && y) or a plain expression context
+// (e.g. return a || b, z := a && b). This is a deliberate, documented
+// design choice that matches the spirit of crap4js. It produces slightly
+// higher CC for functions with boolean expressions outside conditions but
+// is consistent and simple to understand.
 func binaryExprCC(b *ast.BinaryExpr) int {
 	if _, ok := logicalOps[b.Op]; ok {
 		return 1

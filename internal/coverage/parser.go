@@ -140,6 +140,11 @@ func processLine(filename string, lineNum int, line string, p *Profile) error {
 // Functions with no overlapping coverage blocks are mapped to the sentinel
 // value −1, indicating "no data available".
 //
+// When a closure's line range is nested inside an outer function, coverage
+// blocks that fall within the closure are attributed only to the innermost
+// matching function. This prevents double-counting and gives accurate
+// coverage fractions for both the closure and its enclosing function.
+//
 // fset is accepted for API compatibility but is not required for the current
 // line-based matching strategy.
 func MapCoverage(
@@ -150,32 +155,73 @@ func MapCoverage(
 	result := make(map[string]float64, len(functions))
 	_ = fset // reserved for future position-based matching
 
+	if len(functions) == 0 {
+		return result
+	}
+
+	// Sort a working copy by span length ascending so the innermost (shortest
+	// span) function is considered first for each block.
+	sorted := make([]*complexity.Function, len(functions))
+	copy(sorted, functions)
+	sortBySpan(sorted)
+
+	// Assign each block to the innermost function whose file and line range
+	// contain it. Track already-claimed blocks by index so outer functions
+	// cannot double-count blocks belonging to nested closures.
+	type tally struct{ total, covered int }
+	tallies := make(map[string]*tally, len(functions))
+	for _, fn := range sorted {
+		tallies[fn.File+":"+fn.Name] = &tally{}
+	}
+	claimed := make([]bool, len(profile.Blocks))
+
+	for _, fn := range sorted {
+		key := fn.File + ":" + fn.Name
+		t := tallies[key]
+		for i := range profile.Blocks {
+			if claimed[i] {
+				continue
+			}
+			b := &profile.Blocks[i]
+			if !fileMatches(b.File, fn.File) || !blockInRange(b, fn) {
+				continue
+			}
+			claimed[i] = true
+			t.total += b.NumStmts
+			if b.Count > 0 {
+				t.covered += b.NumStmts
+			}
+		}
+	}
+
 	for _, fn := range functions {
 		key := fn.File + ":" + fn.Name
-		result[key] = coverageFraction(profile.Blocks, fn)
+		t := tallies[key]
+		if t.total == 0 {
+			result[key] = -1
+		} else {
+			result[key] = float64(t.covered) / float64(t.total)
+		}
 	}
 
 	return result
 }
 
-// coverageFraction computes the statement coverage fraction for fn over blocks.
-// Returns -1 when no overlapping blocks are found.
-func coverageFraction(blocks []Block, fn *complexity.Function) float64 {
-	total, covered := 0, 0
-	for i := range blocks {
-		b := &blocks[i]
-		if !fileMatches(b.File, fn.File) || !blockInRange(b, fn) {
-			continue
-		}
-		total += b.NumStmts
-		if b.Count > 0 {
-			covered += b.NumStmts
+// sortBySpan sorts functions by span length (EndLine-StartLine) ascending,
+// so innermost (shortest) functions are processed first during block claiming.
+func sortBySpan(fns []*complexity.Function) {
+	// insertion sort — function lists are typically small
+	for i := 1; i < len(fns); i++ {
+		for j := i; j > 0; j-- {
+			ai := fns[j].EndLine - fns[j].StartLine
+			aj := fns[j-1].EndLine - fns[j-1].StartLine
+			if ai < aj {
+				fns[j], fns[j-1] = fns[j-1], fns[j]
+			} else {
+				break
+			}
 		}
 	}
-	if total == 0 {
-		return -1
-	}
-	return float64(covered) / float64(total)
 }
 
 // blockInRange reports whether b falls entirely within fn's line span.
