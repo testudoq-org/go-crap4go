@@ -5,6 +5,7 @@ package pipeline
 
 import (
 	"fmt"
+	"go/build"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -142,6 +143,12 @@ func collectFiles(dir string, paths []string) ([]string, error) {
 			return skipDirDecision(path, dir, d)
 		}
 		if !isGoSourceFile(path) || !matchesFilter(path, dir, paths) {
+			return nil
+		}
+		// Skip files whose build constraints are not satisfied by the current
+		// build context (e.g. //go:build ignore, OS/arch constraints).
+		match, err := build.Default.MatchFile(filepath.Dir(path), filepath.Base(path))
+		if err != nil || !match {
 			return nil
 		}
 		result = append(result, path)

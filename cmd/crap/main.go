@@ -64,6 +64,14 @@ contain at least one of the supplied fragments (OR semantics).`,
 
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg.Paths = args
+			if cfg.ConfigFile != "" {
+				fc, loadErr := config.LoadFile(cfg.ConfigFile)
+				if loadErr != nil {
+					return loadErr
+				}
+				cfg = config.ApplyFile(cfg, fc, changedFlags(cmd,
+					"coverprofile", "run-tests", "no-run-tests", "threshold", "all"))
+			}
 			return run(cfg)
 		},
 
@@ -168,6 +176,17 @@ func runGoTests() (string, error) {
 		return "", fmt.Errorf("go test: %w", err)
 	}
 	return tmp.Name(), nil
+}
+
+// changedFlags builds a set of flag names that were explicitly set on the
+// command line, allowing config file values to be applied only for flags
+// that the user did not provide.
+func changedFlags(cmd *cobra.Command, names ...string) map[string]bool {
+	m := make(map[string]bool, len(names))
+	for _, name := range names {
+		m[name] = cmd.Flags().Changed(name)
+	}
+	return m
 }
 
 // filterEntries returns entries to display. When showAll is false, low-risk

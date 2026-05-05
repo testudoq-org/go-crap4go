@@ -319,6 +319,30 @@ func TestAnalyse_EmptyDir(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// TestAnalyse_BuildTagIgnored
+// ---------------------------------------------------------------------------
+
+// TestAnalyse_BuildTagIgnored verifies that source files annotated with
+// //go:build ignore are silently excluded from analysis. The fixture at
+// testdata/pipeline/buildtag/buildtag.go contains only IgnoredFunction;
+// it must never appear in pipeline results.
+func TestAnalyse_BuildTagIgnored(t *testing.T) {
+	cfg := config.Config{
+		Dir:   fixturesDir(t),
+		Paths: []string{"buildtag"},
+	}
+	entries, err := pipeline.Analyse(cfg)
+	if err != nil {
+		t.Fatalf("Analyse: %v", err)
+	}
+	for _, e := range entries {
+		if e.Name == "IgnoredFunction" {
+			t.Errorf("IgnoredFunction appeared in results; file with //go:build ignore must be excluded")
+		}
+	}
+}
+
 // TestAnalyse_NoMatchingPaths verifies that a path filter that matches no
 // files returns an empty slice (not an error).
 func TestAnalyse_NoMatchingPaths(t *testing.T) {

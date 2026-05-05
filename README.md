@@ -94,7 +94,7 @@ crap --threshold=20
 | `--run-tests` | `false` | Force re-running `go test` even with `--coverprofile` |
 | `--no-run-tests` | `false` | Never run `go test`; `--coverprofile` required |
 | `--threshold` | `30` | Minimum score for "high" risk (exit code 1) |
-| `--config` | | Path to a `crap.toml` or `.crap.json` config file |
+| `--config` | | Path to a `crap.toml` or `.crap.json` config file (see below) |
 | `--all` | `false` | Show all functions, including low-risk ones |
 
 ### Example output
@@ -120,6 +120,41 @@ Exit code `1` is returned when any function's CRAP score meets or exceeds the th
 
 ---
 
+## Configuration file
+
+crap4go optionally loads settings from a config file specified with `--config`. Both TOML and JSON formats are supported.
+
+**Priority order (highest first):** CLI flags > config file > built-in defaults.
+
+### crap.toml
+
+```toml
+coverprofile = "coverage.out"
+threshold    = 20
+all          = true
+paths        = ["internal", "cmd"]
+```
+
+### .crap.json
+
+```json
+{
+  "coverprofile": "coverage.out",
+  "threshold": 20,
+  "all": true,
+  "paths": ["internal", "cmd"]
+}
+```
+
+| Field | Type | CLI equivalent | Default |
+|-------|------|----------------|---------|
+| `coverprofile` | string | `--coverprofile` | *(run tests)* |
+| `threshold` | int | `--threshold` | `30` |
+| `all` | bool | `--all` | `false` |
+| `paths` | []string | positional args | *(all)* |
+
+---
+
 ## Architecture
 
 ```
@@ -134,7 +169,9 @@ crap4go/
 │   └── config/              # config loading + defaults
 ├── testdata/
 │   ├── complexity/          # .go fixture files for CC tests
-│   └── coverage/            # coverage.out fixtures
+│   ├── coverage/            # coverage.out fixtures
+│   ├── config/              # crap.toml / .crap.json fixtures
+│   └── pipeline/            # integration fixture packages
 ├── go.mod
 ├── Makefile
 └── README.md
@@ -198,11 +235,11 @@ All packages must maintain **>= 85% statement coverage**. Critical packages (`in
 | Prompt | Branch | Status |
 |--------|--------|--------|
 | 0 — Project scaffold | `prompt-0-project-scaffold` | done |
-| 1 — Core CRAP logic | `prompt-1-core-crap-logic` | planned |
-| 2 — Complexity extractor | `prompt-2-complexity-extractor` | planned |
-| 3 — Coverage parser & mapping | `prompt-3-coverage` | planned |
-| 4 — CLI orchestration | `prompt-4-orchestration` | planned |
-| 5 — Polish, dogfooding & docs | `prompt-5-polish` | planned |
+| 1 — Core CRAP logic | `prompt-1-core-crap-logic` | done |
+| 2 — Complexity extractor | `prompt-2-complexity-extractor` | done |
+| 3 — Coverage parser & mapping | `prompt-3-coverage` | done |
+| 4 — CLI orchestration | `prompt-4-orchestration` | done |
+| 5 — Polish, dogfooding & docs | `prompt-5-polish` | done |
 
 ---
 
